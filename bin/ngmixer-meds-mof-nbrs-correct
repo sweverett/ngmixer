@@ -82,20 +82,14 @@ def _get_corr_files(meds_files,work_dir,ngmix_run):
     """
     Local files will get cleaned up
     """
-    start = 0
-    end = None
 
     corr_files = []
 
     for f in meds_files:
-        if end is None:
-            od = fitsio.read(f,extname='object_data')
-            end = len(od)-1
-            del od
         newf = _get_corr_fname(f,work_dir,ngmix_run)
         corr_files.append(newf)
 
-    return corr_files,start,end
+    return corr_files
 
 def _expand_path(path):
     path=os.path.expandvars(path)
@@ -197,7 +191,10 @@ def get_renderer(ngmix_output):
 
     return renderer
 
-def get_range(options):
+def get_range(options, meds_files):
+    ''' Grab object range from input args or set to
+        default of all objects
+    '''
     if options.object_range is not None:
         ostrs = options.object_range.strip().split(',')
         if len(ostrs) != 2:
@@ -211,16 +208,33 @@ def get_range(options):
                   "object %d less than first object %d)\n" % (mend,mstart))
             parser.print_help()
             sys.exit(45)
+    else:
+        size = None
+        for f in meds_files:
+            od = fitsio.read(f,extname='object_data')
+            s = len(od)-1
+            if size is None:
+                size = s
+            if size != s:
+                raise ValueError("MEDS catalogs do not have consistent sizes!")
+            del od
+        mstart, mend = 0, size
+
     return mstart, mend
 
 def get_band(corr_file, band_names):
     # get the band for the file
     band = -1
     for band_name in band_names:
-        btest = '-%s-' % band_name
-        if btest in corr_file:
-            band = band_names.index(band_name)
-            break
+        # Allow band to be defined in filename
+        # in 2 different ways:
+        b1 = '-%s-' % band_name
+        b2 = '_%s_' % band_name
+        btests = [b1, b2]
+        for btest in btests:
+            if btest in corr_file:
+                band = band_names.index(band_name)
+                break
     if band == -1:
         raise ValueError("Could not find band for file '%s'!" % corr_file)
 
@@ -247,9 +261,9 @@ if __name__ == '__main__':
     band_names = ['g','r','i','z']
 
     # get meds files
-    corr_files,mstart,mend = _get_corr_files(meds_files,options.work_dir,ngmix_run)
+    corr_files = _get_corr_files(meds_files,options.work_dir,ngmix_run)
 
-    mstart, mend = get_range(options)
+    mstart, mend = get_range(options, meds_files)
 
     # correct each file
     for corr_file,meds_file in zip(corr_files,meds_files):
@@ -333,7 +347,7 @@ if __name__ == '__main__':
 
                         # set masked or zero weight pixels to the value of the central.
                         # For codes that use the weight, such as max like, this makes
-                        # no difference, but it may be important for codes that 
+                        # no difference, but it may be important for codes that
                         # take moments or use FFTs
                         if options.replace_bad:
                             wbad=numpy.where( (bmask != 0) | (wgt < min_weight) )
